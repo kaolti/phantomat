@@ -82,6 +82,10 @@ hl.config({
       canvas = {
         enabled = true,
         desktop_mode = true,
+        linked_screens = true,  -- false: each screen has its own camera
+        places = false,         -- SUPER + 1…0 go to places on the canvas (experimental)
+        place_monitors = "",    -- optional starting screens, e.g. "1-5:DP-1"; SUPER + SHIFT + ALT + arrows move places
+        tile_places = false,    -- windows in a place tile to fill its screen
         persistent = true,
         initial_zoom = 0.72,
         min_zoom = 0.15,
@@ -256,13 +260,18 @@ for _, move in ipairs({
   }), { repeating = true })
 end
 
--- On the canvas floating/tiling means nothing, so SUPER + T makes the focused
--- window fill the screen it is on instead; again puts it back. Tiled
--- desktops toggle floating.
+-- On the canvas, SUPER + T floats the focused window out of a tiled place
+-- (or tiles it again); outside one it fills the screen it is on, and again
+-- puts it back. Tiled desktops toggle floating.
 hl.unbind("SUPER + T")
-bind("SUPER + T", "Fill screen (canvas) / toggle floating", canvas_or("fill", {
+bind("SUPER + T", "Float in place / fill screen (canvas) / toggle floating", canvas_or("float", {
   hl.dsp.window.float({ action = "toggle" }),
 }))
+
+-- On the canvas, SUPER + M opens the menu of the place this screen shows
+-- (arrows pick, Enter runs, Esc closes).
+hl.unbind("SUPER + M")
+bind("SUPER + M", "Place menu (canvas)", canvas_or("menu", {}))
 
 -- Keys that tile, group, pop windows out or move workspaces between monitors
 -- mean something else on the canvas, where every window floats and the
@@ -284,7 +293,7 @@ local canvas_keys = {
 -- a group.
 table.insert(canvas_keys, { "SUPER + G", "Toggle window grouping", "noop", { hl.dsp.group.toggle() } })
 for _, move in ipairs({ { "LEFT", "l", "left" }, { "RIGHT", "r", "right" }, { "UP", "u", "up" }, { "DOWN", "d", "down" } }) do
-  table.insert(canvas_keys, { "SUPER + SHIFT + ALT + " .. move[1], "Move workspace to " .. move[3] .. " monitor", "noop", { hl.dsp.workspace.move({ monitor = move[2] }) } })
+  table.insert(canvas_keys, { "SUPER + SHIFT + ALT + " .. move[1], "Move place (canvas) / workspace to " .. move[3] .. " monitor", "assign " .. move[3], { hl.dsp.workspace.move({ monitor = move[2] }) } })
   table.insert(canvas_keys, { "SUPER + ALT + " .. move[1], "Move window to group on " .. move[3], "noop", { hl.dsp.window.move({ into_group = move[2] }) } })
 end
 for _, key in ipairs(canvas_keys) do

@@ -96,8 +96,9 @@ them too.
 | `SUPER + T`, `SUPER + ALT + F` | Make the focused window fill its screen, with the usual gaps; again puts it back. |
 | `SUPER + F`, or an app going fullscreen | Fullscreen on the screen the window is on; the other screens keep the canvas. `SUPER + CTRL + G` takes the screen back, going back to the window makes it fullscreen again. |
 | `SUPER + O` | Pin the window to the screen: it stays put while the canvas moves; again puts it back on the canvas. |
-| `SUPER + 1` … `0`, `SUPER + TAB` and the other workspace keys | Nothing, on the canvas (with `canvas.places`, experimental: places on the canvas). |
-| `SUPER + J`, `P`, `L`, `Home`, `G`, `SHIFT + ALT + SUPER` + arrows | Tiling and grouping keys: nothing, on the canvas (every window floats). |
+| `SUPER + 1` … `0`, `SUPER + TAB` and the other workspace keys | Nothing, on the canvas (with `canvas.places`, experimental: places on the canvas, each on its own screen, optionally tiled). |
+| `SUPER + J`, `P`, `L`, `Home`, `G` | Tiling and grouping keys: nothing, on the canvas (every window floats). |
+| `SHIFT + ALT + SUPER` + arrows | With `canvas.places`: move the place you are on, with its windows, to the screen in that direction. |
 | Middle-drag | Pan the canvas. |
 | `CTRL` + wheel, pinch | Zoom. |
 | `SUPER` + left-drag, right-drag | Move, resize a window. |
@@ -145,7 +146,9 @@ Everything can also be set in `~/.config/hypr/spatialoverview.lua` (then
 | --- | --- |
 | `canvas.desktop_mode` | Enable the shared infinite-window desktop |
 | `canvas.linked_screens` | Screens show adjacent parts of the canvas and move together (default); off: each screen is its own camera |
-| `canvas.places` | Experimental, off by default: the workspace keys go to places on the canvas and take windows there |
+| `canvas.places` | Experimental, off by default: the workspace keys go to places on the canvas and take windows there. On linked screens a place is a view of the whole desk that remembers where you left it. With `linked_screens = false`, a place is one screen's worth of canvas and belongs to one screen, and the settings below apply. Right-click empty canvas (zoomed out or not) to make a new place there for that screen; zoomed out, drag a place's number or outline to move it with its windows (a click on the number goes there), right-click a window (a right-drag still resizes it) to send it to a space or a screen, and right-click a place off its windows (or press `SUPER + M`) for a menu: go to it, bring the focused window there, name it (the name shows by its number), change its number (a taken number swaps), move it to another screen, switch its tiling on or off, or delete it. The menus work from the keyboard too: arrows or Tab pick, Enter runs, Left or Backspace go back, Esc closes, and a digit picks a number. The × beside a place's number deletes it too; its windows stay where they are |
+| `canvas.place_monitors` | Optional starting screens for places, e.g. `"1-5:DP-1 6-10:HDMI-A-1"`. Otherwise a place belongs to the screen it is first visited from, and `SUPER + SHIFT + ALT` + arrows move the place you are on (with its windows) to the next screen. Assignments are remembered in `~/.local/state/spatial-overview/place-monitors` and win over this setting |
+| `canvas.tile_places` | Whether places tile by default (each place can switch it in its menu). Windows in a tiled place tile (dwindle) to fill its screen; `SUPER + SHIFT` + arrows swap them, and past the last window move to the place the next screen is showing. Dropping a window on another's tile swaps them. Resizing a tiled window (mouse, keys or the app) floats it in its place at that size; `SUPER + T` floats a window out of the tiling or tiles it again, and `SUPER` + double-click snaps a floating one back into the tiling (outside a tiled place it fills the screen). A fullscreen app (`SUPER + F`) stays at its place: going to another place brings the canvas back, and returning makes it fullscreen again |
 | `canvas.initial_zoom` | Camera zoom when desktop mode opens |
 | `canvas.min_zoom` / `max_zoom` | Continuous camera zoom limits |
 | `canvas.zoom_step` | Ctrl-wheel zoom strength |
@@ -204,7 +207,7 @@ color.
 
 For scripts and bindings, `hl.plugin.spatialoverview.canvas(...)` takes
 `search [text]`, `tune`, `fill`, `pin`, `go <place>|next|prev|back`,
-`send <place> [stay]`, `switch next|prev`, `fit`, `summon`, `zoom in|out`,
+`send <place> [stay]`, `assign left|right|up|down|<monitor>`, `menu [place]`, `switch next|prev`, `fit`, `summon`, `zoom in|out`,
 `pan <dir>`, `nudge <dir>`, `undo`, `redo`, `arrange`, `frame`, `land`, `back`,
 `noop` (for keys that do nothing on the canvas) and `refresh`.
 `hyprctl spatialoverview` prints the canvases' state as JSON.

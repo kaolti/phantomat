@@ -113,6 +113,8 @@ bool          getCanvasDesktopMode();
 bool          getCanvasPersistent();
 bool          getCanvasLinkedScreens();
 bool          getCanvasPlaces();
+std::string   getCanvasPlaceMonitors();
+bool          getCanvasTilePlaces();
 float         getCanvasInitialZoom();
 float         getCanvasMinZoom();
 float         getCanvasMaxZoom();

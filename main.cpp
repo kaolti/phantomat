@@ -458,7 +458,10 @@ std::string canvasStateJson();
 static SP<SHyprCtlCommand> g_stateCommand;
 void canvasFullscreenReset();
 bool canvasToggleFill(PHLWINDOW window);
+bool canvasToggleTiled(PHLWINDOW window); // scrollOverview.cpp
+bool canvasPlaceKeyWhileFullscreen(const PHLMONITOR& focused, const std::string& action);
 bool canvasTogglePin(PHLWINDOW window);
+void notePlacePointerButton(bool pressed);
 
 static SDispatchResult onOverviewDispatcher(std::string arg) {
     const auto [ACTION, TARGET] = splitOverviewArg(arg);
@@ -627,6 +630,10 @@ static SDispatchResult onCanvasDispatcher(std::string arg) {
         requestFlightDeckNative(Desktop::focusState()->window(), arg == "fullscreen" ? Fullscreen::FSMODE_FULLSCREEN : arg == "maximize" ? Fullscreen::FSMODE_MAXIMIZED : Fullscreen::FSMODE_NONE);
         return {};
     }
+    if (arg == "float")
+        return canvasToggleTiled(Desktop::focusState()->window()) || canvasToggleFill(Desktop::focusState()->window()) ?
+            SDispatchResult{} :
+            SDispatchResult{.success = false, .error = "Open the canvas before using this action"};
     if (arg == "fill")
         return canvasToggleFill(Desktop::focusState()->window()) ? SDispatchResult{} : SDispatchResult{.success = false, .error = "Open the canvas before using this action"};
     if (arg == "pin")
@@ -636,11 +643,14 @@ static SDispatchResult onCanvasDispatcher(std::string arg) {
     if (arg == "noop")
         return std::ranges::any_of(scrollOverviews(), [](const auto& overview) { return overview && !overview->isClosing(); }) ? SDispatchResult{}
                                                                                                                                 : SDispatchResult{.success = false, .error = "Open the canvas before using this action"};
+    if (!CANVAS && (arg.starts_with("go ") || arg.starts_with("send ") || arg.starts_with("assign ")) &&
+        canvasPlaceKeyWhileFullscreen(Desktop::focusState()->monitor(), arg))
+        return {};
     if (!CANVAS)
         return arg == "refresh" ? SDispatchResult{} : SDispatchResult{.success = false, .error = "Open the canvas before using this action"};
     if (arg == "back" || arg == "land" || arg == "frame" || arg == "undo" || arg == "redo" || arg == "fit" || arg == "summon" || arg == "search" || arg == "tune" ||
         arg.starts_with("search ") || arg.starts_with("zoom ") || arg.starts_with("pan ") || arg.starts_with("nudge ") || arg.starts_with("area ") || arg.starts_with("go ") ||
-        arg.starts_with("send "))
+        arg.starts_with("send ") || arg.starts_with("assign ") || arg == "menu" || arg.starts_with("menu "))
         return CANVAS->flightDeckAction(arg) ? SDispatchResult{} : SDispatchResult{.success = false, .error = "No matching window, area or undo state"};
 
     std::istringstream stream{arg};
@@ -891,6 +901,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     static auto P = Event::bus()->m_events.render.pre.listen([](PHLMONITOR monitor) {
         if (const auto overview = scrollOverviewForMonitor(monitor))
             overview->onPreRender();
+    });
+    static auto PLACEBUTTONS = Event::bus()->m_events.input.mouse.button.listen([](IPointer::SButtonEvent event, Event::SCallbackInfo&) {
+        notePlacePointerButton(event.state == WL_POINTER_BUTTON_STATE_PRESSED);
     });
     static auto HUDSTAGE = Event::bus()->m_events.render.stage.listen([](eRenderStage stage) {
         if (stage == RENDER_LAST_MOMENT)

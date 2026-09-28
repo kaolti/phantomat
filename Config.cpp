@@ -71,9 +71,9 @@ SDispatcher* findDispatcher(const std::string_view name) {
         },
         {
             .name            = "canvas",
-            .argPattern      = std::regex{R"(^((place|viewport)[ \t]+-?[0-9]+[ \t]+-?[0-9]+|area[ \t]+[1-9][0-9]*|send[ \t]+[1-9][0-9]*([ \t]+stay)?|go[ \t]+([1-9][0-9]*|next|prev|back)|refresh|arrange|land|back|frame|undo|redo|fit|summon|tune|fill|pin|noop|search([ \t]+[^"\\]+)?|zoom[ \t]+(in|out)|(pan|nudge)[ \t]+(left|right|up|down)|native|maximize|fullscreen|restore|experiment[ \t]+(baseline|landing|labels|alttab|areas|quiet|persist|depth|lens|all|next|prev|status)|alttab[ \t]+(next|prev)|switch[ \t]+(next|prev))$)"},
+            .argPattern      = std::regex{R"(^((place|viewport)[ \t]+-?[0-9]+[ \t]+-?[0-9]+|area[ \t]+[1-9][0-9]*|send[ \t]+[1-9][0-9]*([ \t]+stay)?|go[ \t]+([1-9][0-9]*|next|prev|back)|assign[ \t]+[^ \t\"\\]+|menu([ \t]+[1-9][0-9]*)?|refresh|arrange|land|back|frame|undo|redo|fit|summon|tune|fill|float|pin|noop|search([ \t]+[^"\\]+)?|zoom[ \t]+(in|out)|(pan|nudge)[ \t]+(left|right|up|down)|native|maximize|fullscreen|restore|experiment[ \t]+(baseline|landing|labels|alttab|areas|quiet|persist|depth|lens|all|next|prev|status)|alttab[ \t]+(next|prev)|switch[ \t]+(next|prev))$)"},
             .typeArgError    = "expected a string argument",
-            .invalidArgError = "expected: search [text] | tune | fill | pin | noop | fit | summon | zoom in|out | pan/nudge left|right|up|down | undo | redo | arrange | land | back | frame | place <column> <row> | viewport <x> <y> | area <id> | go <place>|next|prev|back | send <place> [stay] | refresh | native | maximize | fullscreen | restore | experiment <name> | alttab next|prev | switch next|prev",
+            .invalidArgError = "expected: search [text] | tune | fill | float | pin | noop | fit | summon | zoom in|out | pan/nudge left|right|up|down | undo | redo | arrange | land | back | frame | place <column> <row> | viewport <x> <y> | area <id> | go <place>|next|prev|back | send <place> [stay] | assign left|right|up|down|<monitor> | menu [place] | refresh | native | maximize | fullscreen | restore | experiment <name> | alttab next|prev | switch next|prev",
             .luaFunction     = [](lua_State* L) { return dispatcherFactoryLua(L, "canvas"); },
         },
     };
@@ -356,6 +356,12 @@ static void registerConfigValues() {
                                   makeShared<CBoolValue>("plugin:spatialoverview:canvas:linked_screens", "screens show adjacent parts of the canvas and move together, like one wide desk", true));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CBoolValue>("plugin:spatialoverview:canvas:places", "workspace keys go to places on the canvas (experimental); off, they do nothing on the canvas", false));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CStringValue>("plugin:spatialoverview:canvas:place_monitors",
+                                                           "starting screens for places, as \"1-5:DP-1 6-10:HDMI-A-1\"; a place is otherwise claimed by the screen it is first visited from, and canvas \"assign\" moves it for good",
+                                                           Hyprlang::STRING{""}));
+    HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
+                                  makeShared<CBoolValue>("plugin:spatialoverview:canvas:tile_places", "windows in a place tile to fill its screen", false));
     HyprlandAPI::addConfigValueV2(SCROLLOVERVIEW_HANDLE,
                                   makeShared<CFloatValue>("plugin:spatialoverview:canvas:initial_zoom", "initial shared-canvas camera zoom", 0.72F,
                                                           SFloatValueOptions{.min = 0.1F, .max = 2.F}));
@@ -650,6 +656,14 @@ bool getCanvasDesktopMode() {
 
 bool getCanvasPlaces() {
     return getValue<bool>("plugin:spatialoverview:canvas:places");
+}
+
+std::string getCanvasPlaceMonitors() {
+    return getValue<std::string>("plugin:spatialoverview:canvas:place_monitors");
+}
+
+bool getCanvasTilePlaces() {
+    return getValue<bool>("plugin:spatialoverview:canvas:tile_places");
 }
 
 bool getCanvasLinkedScreens() {

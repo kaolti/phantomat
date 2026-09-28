@@ -12,6 +12,7 @@
 #include <hyprland/src/render/Framebuffer.hpp>
 #include <hyprland/src/render/types.hpp>
 #include <chrono>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -23,6 +24,8 @@
 
 class CMonitor;
 struct wl_event_source;
+struct SPlaceChrome;
+struct SPlaceMenuItem;
 
 class CScrollOverview : public IOverview {
   public:
@@ -67,6 +70,31 @@ class CScrollOverview : public IOverview {
     void         refreshCanvasSettings();
     bool         flightDeckAction(const std::string& action);
     bool         canvasPlaceAction(const std::string& action);
+    bool         linkedPlaceAction(const std::string& action);
+    void         expectPlaceFullscreen(int place, const PHLMONITOR& monitor);
+    void         placeFullscreenCheck();
+    bool         nudgeInPlace(PHLWINDOW window, const Vector2D& direction);
+    bool         placeClick(const Vector2D& world, const Vector2D& local);
+    int          placeCloseAt(const Vector2D& local) const;
+    int          placeBadgeAt(const Vector2D& local) const;
+    int          placeEdgeAt(const Vector2D& local) const;
+    bool         placeDragPress(const Vector2D& local);
+    bool         placeDragMotion(const Vector2D& local);
+    bool         placeDragRelease();
+    void         placeRightPress(PHLWINDOW window, const Vector2D& local);
+    void         openWindowMenu(PHLWINDOW window, const Vector2D& local);
+    bool         sendWindowTo(PHLWINDOW window, int place, PHLMONITOR screen);
+    bool         placeRightRelease(const Vector2D& local, bool resized);
+    bool         movePlace(int place, const PHLMONITOR& to);
+    void         openPlaceMenu(int place, const Vector2D& local, bool keys = false);
+    bool         placeMenuOpen() const;
+    bool         placeMenuPress(const Vector2D& local, bool main);
+    void         activatePlaceMenuItem(const SPlaceMenuItem& item, bool keys);
+    bool         placeMenuKey(const IKeyboard::SKeyEvent& event, uint32_t keysym, uint32_t mods);
+    void         renderPlaceMenu(PHLMONITOR monitor);
+    std::optional<SPlaceChrome> placeChrome(int place, const PHLMONITOR& monitor) const;
+    void         reconcilePlaces();
+    void         renderPlaceOutlines(PHLMONITOR monitor);
     bool   tunerKeyAction(uint32_t keysym, uint32_t mods, const std::string& text);
     bool         navigatorKeyAction(uint32_t keysym, uint32_t mods, const std::string& text, bool repeat);
     bool         openNavigator(const std::string& query = {});
