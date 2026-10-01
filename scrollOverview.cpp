@@ -4682,13 +4682,12 @@ bool CScrollOverview::arrangeCanvasWindows() {
     }
 
     struct SArrangeItem {
-        PHLWINDOW                 window;
-        SP<Layout::ITarget>       target;
-        CBox                      originalBox;
-        Vector2D                  arrangedSize;
-        ECanvasWindowCategory     category = ECanvasWindowCategory::OTHER;
-        std::set<std::string>     tokens;
-        std::string               groupKey;
+        PHLWINDOW           window;
+        SP<Layout::ITarget> target;
+        CBox                originalBox;
+        Vector2D            arrangedSize;
+        int                 workspaceId = 1;
+        bool                isSpecial   = false;
     };
 
     std::vector<SArrangeItem> items;
@@ -4717,8 +4716,8 @@ bool CScrollOverview::arrangeCanvasWindows() {
             .target       = TARGET,
             .originalBox  = BOX,
             .arrangedSize = BOX.size(),
-            .category     = canvasWindowCategory(WINDOW),
-            .tokens       = canvasContextTokens(WINDOW),
+            .workspaceId  = WINDOW->m_workspace ? WINDOW->m_workspace->m_id : 1,
+            .isSpecial    = WINDOW->m_workspace && WINDOW->m_workspace->m_isSpecialWorkspace,
         });
     }
 
@@ -4727,136 +4726,57 @@ bool CScrollOverview::arrangeCanvasWindows() {
         return false;
     }
 
-    if (ScrollOverview::Config::getCanvasArrangeContextGrouping()) {
-        std::map<std::string, std::vector<size_t>> tokenWindows;
-        for (size_t i = 0; i < items.size(); ++i) {
-            for (const auto& token : items[i].tokens)
-                tokenWindows[token].emplace_back(i);
-        }
+    const float GRID = sc<float>(ScrollOverview::Config::getCanvasGridSize());
 
-        for (size_t i = 0; i < items.size(); ++i) {
-            std::string bestToken;
-            int         bestScore = -1;
-            for (const auto& token : items[i].tokens) {
-                const auto IT = tokenWindows.find(token);
-                if (IT == tokenWindows.end() || IT->second.size() < 2)
-                    continue;
-
-                std::set<ECanvasWindowCategory> categories;
-                for (const auto index : IT->second)
-                    categories.emplace(items[index].category);
-                if (categories.size() < 2)
-                    continue;
-
-                // Longer shared words tend to be project/product names; a
-                // small rarity bonus prevents generic title fragments from
-                // swallowing a more precise local context.
-                const int SCORE = sc<int>(token.size() * 100) - sc<int>(IT->second.size());
-                if (SCORE > bestScore) {
-                    bestScore = SCORE;
-                    bestToken = token;
-                }
-            }
-
-            if (!bestToken.empty())
-                items[i].groupKey = "00-context-" + bestToken;
-        }
-    }
-
-    for (auto& item : items) {
-        if (item.groupKey.empty())
-            item.groupKey = canvasCategoryKey(item.category);
-    }
-
-    const float GRID            = sc<float>(ScrollOverview::Config::getCanvasGridSize());
-    const float SIMILARITY      = ScrollOverview::Config::getCanvasArrangeSizeSimilarity();
-    const float RESIZELIMIT     = ScrollOverview::Config::getCanvasArrangeResizeLimit();
-    const auto relativeChange = [](const Vector2D& from, const Vector2D& to) {
-        return std::max(std::abs(to.x - from.x) / std::max(1.0, from.x), std::abs(to.y - from.y) / std::max(1.0, from.y));
-    };
-    const auto snappedSize = [&](const Vector2D& size) {
-        return Vector2D{
-            std::max(sc<double>(GRID * 2.F), std::round(size.x / GRID) * GRID),
-            std::max(sc<double>(GRID * 2.F), std::round(size.y / GRID) * GRID),
-        };
-    };
-
-    // Every window first receives the nearest grid-sized geometry when that is
-    // within the resize safety limit. Similar windows in the same semantic
-    // group are then normalized to one shared size only when every member can
-    // reach it without exceeding that same limit.
-    for (auto& item : items) {
-        const auto CANDIDATE = snappedSize(item.originalBox.size());
-        if (relativeChange(item.originalBox.size(), CANDIDATE) <= RESIZELIMIT)
-            item.arrangedSize = CANDIDATE;
-    }
-
-    std::map<std::string, std::vector<size_t>> groupedIndices;
+    std::map<int, std::vector<size_t>> workspaceGroups;
     for (size_t i = 0; i < items.size(); ++i)
-        groupedIndices[items[i].groupKey].emplace_back(i);
+        workspaceGroups[items[i].workspaceId].emplace_back(i);
 
-    for (const auto& [key, indices] : groupedIndices) {
-        std::unordered_set<size_t> matched;
-        for (const auto seed : indices) {
-            if (matched.contains(seed))
-                continue;
+    std::vector<int> sortedWorkspaceIds;
+    sortedWorkspaceIds.reserve(workspaceGroups.size());
+    for (const auto& [wsId, _] : workspaceGroups)
+        sortedWorkspaceIds.push_back(wsId);
 
-            std::vector<size_t> cluster{seed};
-            matched.emplace(seed);
-            const auto SEEDSIZE = items[seed].originalBox.size();
-            for (const auto candidate : indices) {
-                if (matched.contains(candidate))
-                    continue;
-                const auto SIZE = items[candidate].originalBox.size();
-                const float DW  = std::abs(SIZE.x - SEEDSIZE.x) / std::max({1.0, SIZE.x, SEEDSIZE.x});
-                const float DH  = std::abs(SIZE.y - SEEDSIZE.y) / std::max({1.0, SIZE.y, SEEDSIZE.y});
-                if (DW <= SIMILARITY && DH <= SIMILARITY) {
-                    cluster.emplace_back(candidate);
-                    matched.emplace(candidate);
-                }
-            }
+    std::sort(sortedWorkspaceIds.begin(), sortedWorkspaceIds.end(), [](int a, int b) {
+        bool aSpecial = a < 0;
+        bool bSpecial = b < 0;
+        if (aSpecial != bSpecial)
+            return !aSpecial;
+        return a < b;
+    });
 
-            if (cluster.size() < 2)
-                continue;
+    const auto computeColumns = [](size_t count) -> size_t {
+        if (count <= 2)
+            return count;
+        if (count <= 4)
+            return 2;
+        if (count <= 9)
+            return 3;
+        return sc<size_t>(std::ceil(std::sqrt(sc<double>(count))));
+    };
 
-            Vector2D average;
-            for (const auto index : cluster)
-                average += items[index].originalBox.size();
-            average /= sc<float>(cluster.size());
-            const auto COMMONSIZE = snappedSize(average);
-            if (!std::all_of(cluster.begin(), cluster.end(), [&](size_t index) {
-                    return relativeChange(items[index].originalBox.size(), COMMONSIZE) <= RESIZELIMIT;
-                }))
-                continue;
-
-            for (const auto index : cluster)
-                items[index].arrangedSize = COMMONSIZE;
-        }
-    }
-
-    struct SGroupLayout {
-        std::string           key;
+    struct SIslandLayout {
+        int                   workspaceId;
         std::vector<size_t>   items;
         std::vector<Vector2D> localPositions;
         Vector2D              size;
         Vector2D              packedPosition;
     };
 
-    std::vector<SGroupLayout> groups;
-    groups.reserve(groupedIndices.size());
     const float WINDOWGAP = GRID;
-    for (const auto& [key, indices] : groupedIndices) {
-        SGroupLayout group{.key = key, .items = indices};
-        const size_t COUNT = indices.size();
-        double averageAspect = 0.0;
-        for (const auto index : indices)
-            averageAspect += items[index].arrangedSize.x / std::max(1.0, items[index].arrangedSize.y);
-        averageAspect /= std::max<size_t>(1, COUNT);
+    std::vector<SIslandLayout> islands;
+    islands.reserve(sortedWorkspaceIds.size());
 
-        size_t columns = COUNT <= 1 ? 1 : sc<size_t>(std::ceil(std::sqrt(sc<double>(COUNT))));
-        if (COUNT <= 3 && averageAspect >= 1.35)
-            columns = 1; // compact landscape sets read better as a column
-        const size_t rows = (COUNT + columns - 1) / columns;
+    for (int wsId : sortedWorkspaceIds) {
+        const auto& indices = workspaceGroups[wsId];
+        const size_t COUNT  = indices.size();
+        if (COUNT == 0)
+            continue;
+
+        SIslandLayout island{.workspaceId = wsId, .items = indices};
+
+        const size_t columns = computeColumns(COUNT);
+        const size_t rows    = (COUNT + columns - 1) / columns;
 
         std::vector<float> columnWidths(columns, 0.F);
         std::vector<float> rowHeights(rows, 0.F);
@@ -4873,51 +4793,96 @@ bool CScrollOverview::arrangeCanvasWindows() {
         for (size_t i = 1; i < rows; ++i)
             rowY[i] = rowY[i - 1] + rowHeights[i - 1] + WINDOWGAP;
 
-        group.localPositions.reserve(COUNT);
+        island.localPositions.reserve(COUNT);
         for (size_t i = 0; i < COUNT; ++i)
-            group.localPositions.emplace_back(columnX[i % columns], rowY[i / columns]);
-        group.size = Vector2D{
+            island.localPositions.emplace_back(columnX[i % columns], rowY[i / columns]);
+
+        island.size = Vector2D{
             columnX.back() + columnWidths.back(),
             rowY.back() + rowHeights.back(),
         };
-        groups.emplace_back(std::move(group));
+        islands.emplace_back(std::move(island));
     }
 
-    const float GROUPGAP    = GRID * 2.F;
-    float       maxRowWidth = MONITOR->m_size.x * 1.9F;
-    for (const auto& group : groups)
-        maxRowWidth = std::max(maxRowWidth, sc<float>(group.size.x));
+    const size_t NUM_ISLANDS = islands.size();
+    if (NUM_ISLANDS == 0) {
+        canvasPlacementFailure = "there are no workspace islands to arrange";
+        return false;
+    }
 
-    float cursorX = 0.F;
-    float cursorY = 0.F;
-    float rowHeight = 0.F;
-    float packedWidth = 0.F;
-    for (auto& group : groups) {
-        if (cursorX > 0.F && cursorX + group.size.x > maxRowWidth) {
-            cursorX = 0.F;
-            cursorY += rowHeight + GROUPGAP;
-            rowHeight = 0.F;
+    const size_t islandCols = computeColumns(NUM_ISLANDS);
+    const size_t islandRows = (NUM_ISLANDS + islandCols - 1) / islandCols;
+
+    // Calculate generous island spacing after knowing the full arranged dimensions of all islands.
+    float maxIslandWidth  = 0.F;
+    float maxIslandHeight = 0.F;
+    for (const auto& island : islands) {
+        maxIslandWidth  = std::max(maxIslandWidth, sc<float>(island.size.x));
+        maxIslandHeight = std::max(maxIslandHeight, sc<float>(island.size.y));
+    }
+
+    const float monW = sc<float>(MONITOR->m_size.x);
+    const float monH = sc<float>(MONITOR->m_size.y);
+    const float islandGapX = std::round(std::max({monW * 0.85F, maxIslandWidth * 0.25F, GRID * 16.F}) / GRID) * GRID;
+    const float islandGapY = std::round(std::max({monH * 0.85F, maxIslandHeight * 0.25F, GRID * 12.F}) / GRID) * GRID;
+
+    std::vector<float> islandColWidths(islandCols, 0.F);
+    std::vector<float> islandRowHeights(islandRows, 0.F);
+    for (size_t k = 0; k < NUM_ISLANDS; ++k) {
+        const size_t c = k % islandCols;
+        const size_t r = k / islandCols;
+        islandColWidths[c]  = std::max(islandColWidths[c], sc<float>(islands[k].size.x));
+        islandRowHeights[r] = std::max(islandRowHeights[r], sc<float>(islands[k].size.y));
+    }
+
+    std::vector<float> islandColX(islandCols, 0.F);
+    std::vector<float> islandRowY(islandRows, 0.F);
+    for (size_t c = 1; c < islandCols; ++c)
+        islandColX[c] = islandColX[c - 1] + islandColWidths[c - 1] + islandGapX;
+    for (size_t r = 1; r < islandRows; ++r)
+        islandRowY[r] = islandRowY[r - 1] + islandRowHeights[r - 1] + islandGapY;
+
+    const float totalPackedWidth  = islandColX.back() + islandColWidths.back();
+    const float totalPackedHeight = islandRowY.back() + islandRowHeights.back();
+
+    // Center each row of islands horizontally within the total packed width
+    for (size_t r = 0; r < islandRows; ++r) {
+        const size_t startIdx   = r * islandCols;
+        const size_t endIdx     = std::min(startIdx + islandCols, NUM_ISLANDS);
+        const size_t countInRow = endIdx - startIdx;
+        if (countInRow == 0)
+            continue;
+
+        float rowWidth = 0.F;
+        for (size_t c = 0; c < countInRow; ++c) {
+            rowWidth += sc<float>(islands[startIdx + c].size.x);
+            if (c + 1 < countInRow)
+                rowWidth += islandGapX;
         }
-        group.packedPosition = Vector2D{cursorX, cursorY};
-        cursorX += group.size.x + GROUPGAP;
-        rowHeight = std::max(rowHeight, sc<float>(group.size.y));
-        packedWidth = std::max(packedWidth, cursorX - GROUPGAP);
+
+        const float rowOffsetX = std::round(((totalPackedWidth - rowWidth) * 0.5F) / GRID) * GRID;
+        float curX = rowOffsetX;
+        for (size_t c = 0; c < countInRow; ++c) {
+            islands[startIdx + c].packedPosition = Vector2D{curX, islandRowY[r]};
+            curX += sc<float>(islands[startIdx + c].size.x) + islandGapX;
+        }
     }
-    const float packedHeight = cursorY + rowHeight;
 
     const auto CAMERA_CENTER = MONITOR->m_position + viewOffset->value() + MONITOR->m_size * 0.5F;
-    Vector2D   worldOrigin   = CAMERA_CENTER - Vector2D{packedWidth, packedHeight} * 0.5F;
+    Vector2D   worldOrigin   = CAMERA_CENTER - Vector2D{totalPackedWidth, totalPackedHeight} * 0.5F;
     worldOrigin.x            = std::round(worldOrigin.x / GRID) * GRID;
     worldOrigin.y            = std::round(worldOrigin.y / GRID) * GRID;
 
-    for (const auto& group : groups) {
-        for (size_t i = 0; i < group.items.size(); ++i) {
-            auto& item = items[group.items[i]];
-            const CBox BOX{worldOrigin + group.packedPosition + group.localPositions[i], item.arrangedSize};
+    for (const auto& island : islands) {
+        for (size_t i = 0; i < island.items.size(); ++i) {
+            auto& item = items[island.items[i]];
+            const CBox BOX{worldOrigin + island.packedPosition + island.localPositions[i], item.arrangedSize};
             item.target->rememberFloatingSize(BOX.size());
             item.target->setPositionGlobal(BOX);
             item.target->warpPositionSize();
             item.target->damageEntire();
+            if (const auto IT = g_canvasFill.find(item.window.get()); IT != g_canvasFill.end())
+                IT->second.filled = BOX;
         }
     }
 
@@ -10236,7 +10201,7 @@ bool CScrollOverview::navigatorKeyAction(uint32_t keysym, uint32_t mods, const s
             case XKB_KEY_a:
             case XKB_KEY_A:
                 if (arrangeCanvasWindows())
-                    Navigator::showNotice(std::format("Tidied {} windows  ·  ⌃Z undoes", Navigator::candidateCount()));
+                    Navigator::showNotice(std::format("Arranged {} windows across workspaces", Navigator::candidateCount()));
                 damage();
                 return true;
             case XKB_KEY_z:
