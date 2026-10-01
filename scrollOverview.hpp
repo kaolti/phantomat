@@ -171,6 +171,7 @@ class CScrollOverview : public IOverview {
     void   renderNavigatorWindowOverlay(PHLMONITOR monitor, PHLWINDOW window, const CBox& windowBox);
     void   renderNavigatorReticle(PHLMONITOR monitor, const Time::steady_tp& now);
     void   renderNavigatorHud(PHLMONITOR monitor);
+    CBox   canvasMinimapPanelBox() const;
     CBox   canvasArrangeButtonBox() const;
     void   renderCanvasViewport(PHLMONITOR monitor, float renderScale);
     void   renderCanvasDesktopScene(PHLMONITOR monitor, float renderScale, const Time::steady_tp& now);

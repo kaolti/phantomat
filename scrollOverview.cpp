@@ -684,6 +684,34 @@ static Vector2D getOverviewMousePosLocal(PHLMONITOR monitor) {
     return {(centered.x * 0.5F + 0.5F) * SIZE.x, (centered.y * 0.5F + 0.5F) * SIZE.y};
 }
 
+static Vector2D visualScreenPosFromRawLocal(PHLMONITOR monitor, const Vector2D& rawLocal) {
+    if (!monitor)
+        return rawLocal;
+    const auto OVERVIEW = scrollOverviewForMonitor(monitor);
+    const auto SPATIAL  = OVERVIEW ? dc<CScrollOverview*>(OVERVIEW.get()) : nullptr;
+    const float PROGRESS = SPATIAL ? SPATIAL->distortionProgress() : 0.F;
+    if (!ScrollOverview::Config::getBarrelEnabled() || SpatialOverview::BarrelShader::shaderPath().empty() || PROGRESS <= 0.F)
+        return rawLocal;
+
+    const auto SIZE = monitor->m_size * monitor->m_scale;
+    if (SIZE.x <= 0.F || SIZE.y <= 0.F)
+        return rawLocal;
+
+    Vector2D centeredSample{rawLocal.x / SIZE.x * 2.F - 1.F, rawLocal.y / SIZE.y * 2.F - 1.F};
+    const float STRENGTH  = ScrollOverview::Config::getBarrelStrength() * PROGRESS;
+    const float EDGESCALE = 1.F + (ScrollOverview::Config::getBarrelEdgeScale() - 1.F) * PROGRESS;
+
+    Vector2D uv = centeredSample;
+    for (int i = 0; i < 4; ++i) {
+        float r2 = uv.x * uv.x + uv.y * uv.y;
+        float factor = (1.F + STRENGTH * r2) / EDGESCALE;
+        if (factor > 1e-4F)
+            uv = centeredSample / factor;
+    }
+
+    return {(uv.x * 0.5F + 0.5F) * SIZE.x, (uv.y * 0.5F + 0.5F) * SIZE.y};
+}
+
 static bool isOverviewPointerOnMonitor(PHLMONITOR monitor) {
     const auto overview = monitor ? scrollOverviewAt(g_pInputManager->getMouseCoordsInternal()) : SP<IOverview>{};
     return overview && overview->pMonitor.lock() == monitor;
@@ -1763,12 +1791,10 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
 
             const auto MONITOR = pMonitor.lock();
             const auto RAWLOCAL = MONITOR ? (g_pInputManager->getMouseCoordsInternal() - MONITOR->m_position) * MONITOR->m_scale : lastMousePosLocal;
+            const auto SCREENLOCAL = visualScreenPosFromRawLocal(MONITOR, RAWLOCAL);
             const auto ARRANGEBUTTON = canvasArrangeButtonBox();
-            // The minimap chrome is composed after the barrel lens, so its hit
-            // target must use raw screen coordinates rather than the inverse-
-            // warped point used for application windows beneath it.
-            const bool ARRANGEBUTTONHIT = !ARRANGEBUTTON.empty() && ARRANGEBUTTON.containsPoint(RAWLOCAL);
-            if (handleExperimentClick(event.button, event.state, RAWLOCAL)) {
+            const bool ARRANGEBUTTONHIT = !ARRANGEBUTTON.empty() && ARRANGEBUTTON.containsPoint(SCREENLOCAL);
+            if (handleExperimentClick(event.button, event.state, SCREENLOCAL)) {
                 info.cancelled = true;
                 requestInputFrame();
                 return;
@@ -1780,10 +1806,13 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
                 if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
                     canvasArrangeButtonPressed = true;
                     g_pointerGrabOverview      = this;
+                    damage();
                 } else {
+                    const bool WASPRESSED = canvasArrangeButtonPressed;
                     canvasArrangeButtonPressed = false;
-                    if (ARRANGEBUTTONHIT)
+                    if (WASPRESSED && (ARRANGEBUTTONHIT || ARRANGEBUTTON.containsPoint(SCREENLOCAL)))
                         arrangeCanvasWindows();
+                    damage();
                 }
                 requestInputFrame();
                 return;
@@ -7450,7 +7479,7 @@ void CScrollOverview::renderCanvasGrid(PHLMONITOR monitor, size_t activeIdx, flo
         DAMAGE);
 }
 
-CBox CScrollOverview::canvasArrangeButtonBox() const {
+CBox CScrollOverview::canvasMinimapPanelBox() const {
     const auto MONITOR = pMonitor.lock();
     if (!isCanvasDesktop() || !ScrollOverview::Config::getCanvasMinimapEnabled() || !MONITOR || overviewProgress() <= 0.001F)
         return {};
@@ -7459,10 +7488,19 @@ CBox CScrollOverview::canvasArrangeButtonBox() const {
     const float WIDTH  = ScrollOverview::Config::getCanvasMinimapWidth() * SCALE;
     const float HEIGHT = ScrollOverview::Config::getCanvasMinimapHeight() * SCALE;
     const float MARGIN = ScrollOverview::Config::getCanvasMinimapMargin() * SCALE;
+    const auto  FULL   = MONITOR->m_size * SCALE;
+    return CBox{FULL.x - MARGIN - WIDTH, FULL.y - MARGIN - HEIGHT, WIDTH, HEIGHT}.round();
+}
+
+CBox CScrollOverview::canvasArrangeButtonBox() const {
+    const auto PANEL = canvasMinimapPanelBox();
+    if (PANEL.empty())
+        return {};
+
+    const auto MONITOR = pMonitor.lock();
+    const float SCALE  = MONITOR ? std::max(MONITOR->m_scale, 0.01F) : 1.F;
     const float SIZE   = 46.F * SCALE;
     const float GAP    = 10.F * SCALE;
-    const auto  FULL   = MONITOR->m_size * SCALE;
-    const CBox  PANEL{FULL.x - MARGIN - WIDTH, FULL.y - MARGIN - HEIGHT, WIDTH, HEIGHT};
     return CBox{PANEL.x - GAP - SIZE, PANEL.y + PANEL.height - SIZE, SIZE, SIZE}.round();
 }
 
@@ -10345,14 +10383,10 @@ bool CScrollOverview::jumpCanvasMinimap(const Vector2D& rawLocal) {
 
     worldBounds->expand(std::max(80.F, sc<float>(std::max(worldBounds->width, worldBounds->height)) * 0.06F));
     const float MONITORSCALE = std::max(MONITOR->m_scale, 0.01F);
-    const float WIDTH = ScrollOverview::Config::getCanvasMinimapWidth() * MONITORSCALE;
-    const float HEIGHT = ScrollOverview::Config::getCanvasMinimapHeight() * MONITORSCALE;
-    const float MARGIN = ScrollOverview::Config::getCanvasMinimapMargin() * MONITORSCALE;
-    const float INSET = 12.F * MONITORSCALE;
-    const auto FULLSIZE = MONITOR->m_size * MONITORSCALE;
-    const CBox PANEL{FULLSIZE.x - MARGIN - WIDTH, FULLSIZE.y - MARGIN - HEIGHT, WIDTH, HEIGHT};
-    if (!PANEL.containsPoint(rawLocal) || canvasArrangeButtonBox().containsPoint(rawLocal))
+    const CBox PANEL = canvasMinimapPanelBox();
+    if (PANEL.empty() || !PANEL.containsPoint(rawLocal) || canvasArrangeButtonBox().containsPoint(rawLocal))
         return false;
+    const float INSET = 12.F * MONITORSCALE;
 
     const CBox CONTENT{PANEL.x + INSET, PANEL.y + INSET, std::max(1.F, sc<float>(PANEL.width - INSET * 2.F)), std::max(1.F, sc<float>(PANEL.height - INSET * 2.F))};
     const float FIT = std::min(sc<float>(CONTENT.width / std::max(worldBounds->width, 1.0)), sc<float>(CONTENT.height / std::max(worldBounds->height, 1.0)));
@@ -10585,8 +10619,11 @@ void CScrollOverview::updateNavigatorHover() {
 
     const auto MONITOR = pMonitor.lock();
     const auto RAW     = MONITOR ? (g_pInputManager->getMouseCoordsInternal() - MONITOR->m_position) * MONITOR->m_scale : Vector2D{};
+    const auto SCREEN  = visualScreenPosFromRawLocal(MONITOR, RAW);
+    const bool OVERARRANGE = canvasArrangeButtonBox().containsPoint(SCREEN);
+    const bool OVERMINIMAP = canvasMinimapPanelBox().containsPoint(SCREEN);
     const bool OVERHUD = showsNavigatorHud() && SpatialOverview::Hud::paletteHit(RAW) != SpatialOverview::Hud::PALETTE_MISS;
-    const auto WINDOW  = OVERHUD ? PHLWINDOW{} : canvasDesktopWindowAtPoint(lastMousePosLocal);
+    const auto WINDOW  = (OVERHUD || OVERARRANGE || OVERMINIMAP) ? PHLWINDOW{} : canvasDesktopWindowAtPoint(lastMousePosLocal);
     if (WINDOW != navigatorHoverWindow.lock()) {
         navigatorHoverWindow = WINDOW;
         damage();
@@ -10595,6 +10632,8 @@ void CScrollOverview::updateNavigatorHover() {
     if (dragActiveWindow || scrollingPanPointerDown)
         setCanvasCursor("grabbing");
     else if (OVERHUD && SpatialOverview::Hud::paletteHit(RAW) >= 0)
+        setCanvasCursor("pointer");
+    else if (OVERARRANGE || OVERMINIMAP)
         setCanvasCursor("pointer");
     else if (WINDOW)
         setCanvasCursor("pointer");
