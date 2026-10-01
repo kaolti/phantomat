@@ -1011,6 +1011,8 @@ void renderOverviewWindow(const SRenderParams& params) {
     const bool     OVERRIDEWORKSPACEOFFSET = WORKSPACE && !params.window->m_pinned;
     const Vector2D previousWorkspaceOffset = OVERRIDEWORKSPACEOFFSET ? WORKSPACE->m_renderOffset->value() : Vector2D{};
     const float    previousWorkspaceAlpha  = OVERRIDEWORKSPACEOFFSET && WORKSPACE->m_alpha ? WORKSPACE->m_alpha->value() : 1.F;
+    const bool     previousWorkspaceVisible = OVERRIDEWORKSPACEOFFSET ? WORKSPACE->m_visible : false;
+    const bool     previousWorkspaceForceRendering = OVERRIDEWORKSPACEOFFSET ? WORKSPACE->m_forceRendering : false;
     std::optional<Render::SRenderModifData> cameraTransform;
 
     if (params.cameraTransform && params.monitor) {
@@ -1042,6 +1044,8 @@ void renderOverviewWindow(const SRenderParams& params) {
         // the current value while queuing and restore it synchronously below.
         if (WORKSPACE->m_alpha)
             WORKSPACE->m_alpha->value() = 1.F;
+        WORKSPACE->m_visible        = true;
+        WORKSPACE->m_forceRendering = true;
     }
 
     auto restoreWindowGeometry = Hyprutils::Utils::CScopeGuard([&] {
@@ -1055,6 +1059,8 @@ void renderOverviewWindow(const SRenderParams& params) {
             WORKSPACE->m_renderOffset->value() = previousWorkspaceOffset;
             if (WORKSPACE->m_alpha)
                 WORKSPACE->m_alpha->value() = previousWorkspaceAlpha;
+            WORKSPACE->m_visible        = previousWorkspaceVisible;
+            WORKSPACE->m_forceRendering = previousWorkspaceForceRendering;
         }
     });
 
@@ -1062,7 +1068,7 @@ void renderOverviewWindow(const SRenderParams& params) {
     const bool   usePrecomputedBlur     = shouldUsePrecomputedBlur(params.window, params.monitor, params.workspaceBox, &params.windowBox, params.dragged);
     if (cameraTransform)
         g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = *cameraTransform}));
-    g_pHyprRenderer->renderWindow(params.window, params.monitor, params.now, false, Render::RENDER_PASS_ALL, false, false);
+    g_pHyprRenderer->renderWindow(params.window, params.monitor, params.now, false, Render::RENDER_PASS_ALL, false, true);
     if (cameraTransform)
         g_pHyprRenderer->m_renderPass.add(
             makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{.renderModif = Render::SRenderModifData{}}));
