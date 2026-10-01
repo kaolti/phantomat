@@ -10941,10 +10941,10 @@ bool CScrollOverview::canvasPlaceAction(const std::string& action) {
     const auto MONITOR = pMonitor.lock();
     if (!MONITOR || !isCanvasDesktop() || closing)
         return false;
-    // Places are off unless canvas:places is set: the workspace keys then do
-    // nothing on the canvas (and succeed, so bindings skip their fallback).
+    // Places are off unless canvas:places is set: return false so
+    // canvas_or bindings execute their fallback (switching workspaces in Hyprland).
     if (!ScrollOverview::Config::getCanvasPlaces())
-        return true;
+        return false;
     // You are at the place of the workspace you were on.
     if (g_place == 0) {
         const auto ID      = MONITOR->m_activeWorkspace ? MONITOR->m_activeWorkspace->m_id : 1;
