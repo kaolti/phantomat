@@ -65,10 +65,14 @@ fi
 
 say "Building Phantomat for Hyprland $headers"
 make -C "$project_dir" -j"$(nproc)" all
-mkdir -p "$data_dir"
+make -C "$project_dir" --no-print-directory -s safe-unload
+mkdir -p "$data_dir" "${XDG_BIN_HOME:-$HOME/.local/bin}"
 install -m 0755 "$project_dir/spatialoverview.so" "$plugin.next"
 mv -f "$plugin.next" "$plugin"
 say "Installed $plugin"
+install -m 0755 "$project_dir/.build/safe-unload.so" "$data_dir/safe-unload.so"
+install -m 0755 "$project_dir/scripts/omarchy-phantomat-toggle.sh" "${XDG_BIN_HOME:-$HOME/.local/bin}/omarchy-phantomat-toggle"
+say "Installed omarchy-phantomat-toggle"
 
 if [[ -e $settings ]]; then
   say "Keeping your settings in $settings"
@@ -90,11 +94,109 @@ else
 
 $marker_begin
 -- Phantomat: added by its scripts/install.sh; scripts/uninstall.sh removes it.
-hl.plugin.load("$plugin")
-dofile("$settings")
+do
+  local disabled_file = io.open(os.getenv("HOME") .. "/.local/state/spatial-overview/disabled", "r")
+  if disabled_file then
+    disabled_file:close()
+  else
+    hl.plugin.load("$plugin")
+    dofile("$settings")
+  end
+end
 $marker_end
 EOF
   say "Added Phantomat to $hyprland_lua (backup next to it)"
+fi
+
+# ---- Omarchy integration --------------------------------------------------------
+
+omarchy_config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy"
+if [[ -d "$omarchy_config_dir" ]] || command -v omarchy >/dev/null 2>&1; then
+  # 1. Omarchy Super+Space menu extension
+  omarchy_menu_ext="$omarchy_config_dir/extensions/omarchy-menu.jsonc"
+  mkdir -p "$(dirname "$omarchy_menu_ext")"
+  python3 - "$omarchy_menu_ext" <<'EOF' 2>/dev/null || true
+import os, sys
+
+path = sys.argv[1]
+entry = '''  "phantomat": {
+    "icon": "󰊠",
+    "label": "Phantomat",
+    "description": "Switch between Phantomat canvas and standard tiled layout",
+    "action": "omarchy-phantomat-toggle",
+    "checked": "hyprctl plugin list 2>/dev/null | grep -q \'^Plugin spatialoverview \'"
+  },
+'''
+content = ""
+if os.path.exists(path):
+    try:
+        content = open(path, "r", encoding="utf-8").read()
+    except Exception:
+        content = ""
+
+if '"phantomat"' not in content:
+    if not content.strip():
+        content = "{\n" + entry + "}\n"
+    else:
+        brace = content.find('{')
+        if brace != -1:
+            content = content[:brace+1] + "\n" + entry + content[brace+1:]
+        else:
+            content = "{\n" + entry + content + "\n}\n"
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+EOF
+  say "Configured Omarchy menu entry in $omarchy_menu_ext"
+  omarchy menu refresh >/dev/null 2>&1 || true
+
+  # 2. Omarchy status bar glyph
+  omarchy_shell_json="$omarchy_config_dir/shell.json"
+  if [[ -f "$omarchy_shell_json" ]] || [[ -f "/usr/share/omarchy/config/omarchy/shell.json" ]]; then
+    if [[ ! -f "$omarchy_shell_json" ]]; then
+      mkdir -p "$omarchy_config_dir"
+      cp -p "/usr/share/omarchy/config/omarchy/shell.json" "$omarchy_shell_json" 2>/dev/null || true
+    fi
+    if [[ -f "$omarchy_shell_json" ]]; then
+      python3 - "$omarchy_shell_json" <<'EOF' 2>/dev/null || true
+import json, sys
+
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    bar = data.get("bar", {})
+    layout = bar.get("layout", {})
+    left = layout.get("left", [])
+    all_ids = [m.get("id") for sec in layout.values() if isinstance(sec, list) for m in sec if isinstance(m, dict)]
+    if "phantomat" not in all_ids:
+        widget = {
+            "id": "phantomat",
+            "type": "command",
+            "exec": "omarchy-phantomat-toggle --status",
+            "interval": 1,
+            "onClick": "omarchy-phantomat-toggle",
+            "onRightClick": "hyprctl dispatch spatialoverview:overview toggle"
+        }
+        idx = -1
+        for i, m in enumerate(left):
+            if isinstance(m, dict) and m.get("id") in ("omarchy.workspaces", "workspaces"):
+                idx = i
+                break
+        if idx >= 0:
+            left.insert(idx + 1, widget)
+        else:
+            left.append(widget)
+        layout["left"] = left
+        bar["layout"] = layout
+        data["bar"] = bar
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+except Exception:
+    pass
+EOF
+      say "Configured Omarchy status bar glyph in $omarchy_shell_json"
+    fi
+  fi
 fi
 
 # ---- load it --------------------------------------------------------------------

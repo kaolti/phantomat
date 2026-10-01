@@ -66,7 +66,54 @@ elif [[ -f $hyprland_lua ]] && grep -q 'spatialoverview' "$hyprland_lua"; then
 fi
 
 rm -rf "$data_dir"
-say "Deleted $data_dir"
+rm -f "${XDG_BIN_HOME:-$HOME/.local/bin}/omarchy-phantomat-toggle"
+say "Deleted $data_dir and omarchy-phantomat-toggle"
+
+omarchy_config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy"
+if [[ -d "$omarchy_config_dir" ]] || command -v omarchy >/dev/null 2>&1; then
+  omarchy_menu_ext="$omarchy_config_dir/extensions/omarchy-menu.jsonc"
+  if [[ -f "$omarchy_menu_ext" ]]; then
+    python3 - "$omarchy_menu_ext" <<'EOF' 2>/dev/null || true
+import re, sys
+path = sys.argv[1]
+try:
+    content = open(path, "r", encoding="utf-8").read()
+    clean = re.sub(r'([ \t]*"phantomat":\s*\{[^}]*\},?\s*)', '', content)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(clean)
+except Exception:
+    pass
+EOF
+    omarchy menu refresh >/dev/null 2>&1 || true
+    say "Removed Phantomat from $omarchy_menu_ext"
+  fi
+
+  omarchy_shell_json="$omarchy_config_dir/shell.json"
+  if [[ -f "$omarchy_shell_json" ]]; then
+    python3 - "$omarchy_shell_json" <<'EOF' 2>/dev/null || true
+import json, sys
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    layout = data.get("bar", {}).get("layout", {})
+    modified = False
+    for sec in ("left", "center", "right"):
+        if sec in layout:
+            items = layout[sec]
+            new_items = [m for m in items if not (isinstance(m, dict) and m.get("id") == "phantomat")]
+            if len(new_items) != len(items):
+                layout[sec] = new_items
+                modified = True
+    if modified:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+except Exception:
+    pass
+EOF
+    say "Removed Phantomat widget from $omarchy_shell_json"
+  fi
+fi
 
 if ((purge)); then
   rm -f "$config_dir/spatialoverview.lua" "$config_dir/spatialoverview-tuning.lua"
