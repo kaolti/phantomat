@@ -216,6 +216,7 @@ class CScrollOverview : public IOverview {
     void         ensureCanvasKeyboardFocus(PHLWINDOW window = {});
     void         seedCanvasWindows();
     void         forwardCanvasPointerMotion(uint32_t timeMs = 0);
+    void         canvasDndPointerMotion();
     bool         forwardCanvasPointerButton(const IPointer::SButtonEvent& event);
     bool         forwardCanvasPointerAxis(const IPointer::SAxisEvent& event);
     Vector2D     canvasCellForWorkspaceIndex(size_t workspaceIdx) const;
