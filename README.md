@@ -212,6 +212,14 @@ For scripts and bindings, `hl.plugin.spatialoverview.canvas(...)` takes
 How each key behaves on the canvas, and what the tests check, is in
 [docs/window-rules.md](docs/window-rules.md).
 
+## Omarchy Integration
+
+Phantomat includes a toggle script and integration snippets for Omarchy's status bar and application menu:
+
+- **Quick toggle CLI**: `omarchy-phantomat-toggle` enables or disables Phantomat in real time, saving canvas window memory and restoring standard tiled layouts.
+- **Status bar glyph**: add the snippet in [`examples/omarchy-bar-module.json`](examples/omarchy-bar-module.json) to `~/.config/omarchy/shell.json` to get a one-click toggle glyph on your bar (`󰊠` active / `󰊡` disabled).
+- **`SUPER + Space` menu**: add the entry in [`examples/omarchy-menu.jsonc`](examples/omarchy-menu.jsonc) to `~/.config/omarchy/extensions/omarchy-menu.jsonc` to toggle Phantomat from the launcher with live active status checkmarks.
+
 ## Troubleshooting
 
 - **"this build is for a different Hyprland version"**: Hyprland was updated.

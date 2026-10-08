@@ -1,0 +1,10 @@
+{
+  // Add this entry inside ~/.config/omarchy/extensions/omarchy-menu.jsonc
+  "phantomat": {
+    "icon": "󰊠",
+    "label": "Phantomat",
+    "description": "Switch between Phantomat canvas and standard tiled layout",
+    "action": "omarchy-phantomat-toggle",
+    "checked": "hyprctl plugin list 2>/dev/null | grep -q '^Plugin spatialoverview '"
+  }
+}
