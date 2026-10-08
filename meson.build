@@ -36,8 +36,34 @@ version_header = custom_target(
 
 hyprland = dependency('hyprland')
 
+if cpp_compiler.get_id() == 'gcc'
+  add_project_arguments('-fno-gnu-unique', language: 'cpp')
+endif
+
+hook_dependencies = []
+hook_link_depends = []
+if host_machine.cpu_family() == 'aarch64'
+  fs = import('fs')
+  dobby_include = get_option('dobby_include')
+  dobby_library = get_option('dobby_library')
+  if dobby_include == '' or dobby_library == ''
+    error('ARM64 builds require dobby_include and dobby_library. See docs/arm64.md.')
+  endif
+  dobby_include = meson.project_source_root() / dobby_include
+  dobby_library = meson.project_source_root() / dobby_library
+  if not fs.is_file(dobby_include / 'dobby.h') or not fs.is_file(dobby_library) or not dobby_library.endswith('.a')
+    error('ARM64 builds require dobby.h and a PIC libdobby.a archive. See docs/arm64.md.')
+  endif
+  hook_dependencies += declare_dependency(
+    include_directories: include_directories(dobby_include),
+    link_args: [dobby_library, '-Wl,--exclude-libs,ALL'],
+  )
+  hook_link_depends += dobby_library
+endif
+
 shared_module(meson.project_name(), src + [version_header],
   include_directories: include_directories('.'),
+  link_depends: hook_link_depends,
   dependencies: [
     dependency('hyprland'),
     dependency('hyprgraphics'),
@@ -49,6 +75,6 @@ shared_module(meson.project_name(), src + [version_header],
     dependency('lua5.4', 'lua', version: '>=5.4'),
     dependency('wayland-server'),
     dependency('xkbcommon'),
-  ],
+  ] + hook_dependencies,
   install: true,
 )

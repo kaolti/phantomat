@@ -1,5 +1,8 @@
 CXX ?= g++
 
+# Optional machine-local paths for the ARM64 hook backend.
+-include .build/dobby-config.mk
+
 EXTRA_FLAGS =
 LUA_PKG ?= $(shell pkg-config --exists 'lua5.4 >= 5.4' && echo lua5.4 || echo lua)
 VERSION_HEADER = .build/PluginVersion.hpp
@@ -16,6 +19,26 @@ OBJECTS = $(SOURCES:%.cpp=$(OBJDIR)/%.o)
 PKGS    = pixman-1 libdrm hyprland pangocairo libinput libudev wayland-server xkbcommon '$(LUA_PKG) >= 5.4'
 CXXFLAGS_ALL = -fPIC $(EXTRA_FLAGS) -I.build -g -std=c++2b -Wno-narrowing `pkg-config --cflags $(PKGS)`
 
+# ARM64 requires an external hook backend; the installed compositor only offers
+# x86_64 function trampolines. Pass both paths for a local ARM64 build.
+DOBBY_INCLUDE ?=
+DOBBY_LIBRARY ?=
+ifneq ($(findstring aarch64,$(shell $(CXX) -dumpmachine)),)
+  ifneq ($(filter-out clean test-tools safe-unload,$(or $(MAKECMDGOALS),all)),)
+    ifeq ($(wildcard $(DOBBY_INCLUDE)/dobby.h),)
+        $(error ARM64 builds require DOBBY_INCLUDE pointing to dobby.h. See docs/arm64.md)
+    endif
+    ifeq ($(filter %.a,$(DOBBY_LIBRARY)),)
+        $(error ARM64 builds require DOBBY_LIBRARY pointing to a PIC libdobby.a archive. See docs/arm64.md)
+    endif
+    ifeq ($(wildcard $(DOBBY_LIBRARY)),)
+        $(error DOBBY_LIBRARY does not exist. See docs/arm64.md)
+    endif
+    CXXFLAGS_ALL += -I$(DOBBY_INCLUDE)
+    HOOK_LIBS = -Wl,--exclude-libs,ALL $(DOBBY_LIBRARY)
+  endif
+endif
+
 ifeq ($(CXX),g++)
     EXTRA_FLAGS += -fno-gnu-unique
 endif
@@ -24,7 +47,7 @@ endif
 
 all: $(OBJECTS)
 	@mkdir -p $(dir $(OUT))
-	$(CXX) -shared -fPIC $(EXTRA_FLAGS) $(OBJECTS) -o $(OUT).next -g `pkg-config --libs pangocairo hyprgraphics`
+	$(CXX) -shared -fPIC $(EXTRA_FLAGS) $(OBJECTS) -o $(OUT).next -g `pkg-config --libs pangocairo hyprgraphics` $(HOOK_LIBS)
 	mv -f $(OUT).next $(OUT)
 
 # The lens shader is compiled into the plugin (#embed in BarrelShader.cpp).

@@ -1,0 +1,2 @@
+option('dobby_include', type: 'string', value: '', description: 'Directory containing dobby.h for ARM64 builds')
+option('dobby_library', type: 'string', value: '', description: 'Path to the PIC libdobby.a archive for ARM64 builds')

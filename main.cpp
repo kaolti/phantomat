@@ -34,22 +34,23 @@ using namespace Hyprutils::String;
 #include "Navigator.hpp"
 #include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
 #include "OverviewGesture.hpp"
+#include "FunctionHook.hpp"
 
 // Methods
-static CFunctionHook* g_pScrollRenderWorkspaceHook = nullptr;
-static CFunctionHook* g_pScrollAddDamageHookA      = nullptr;
-static CFunctionHook* g_pScrollAddDamageHookB      = nullptr;
-static CFunctionHook* g_pScrollDamageSurfaceHook   = nullptr;
-static CFunctionHook* g_pScrollScheduleFrameHook   = nullptr;
-static CFunctionHook* g_pScrollSendFrameEventsHook = nullptr;
-static CFunctionHook* g_pScrollSurfaceFrameHook    = nullptr;
-static CFunctionHook* g_pScrollDrawTexHook         = nullptr;
-static CFunctionHook* g_pScrollElementDrawTexHook  = nullptr;
-static CFunctionHook* g_pPopupRepositionHook       = nullptr;
-static CFunctionHook* g_pBeginDragTargetHook       = nullptr;
-static CFunctionHook* g_pX11ConfigureHook          = nullptr;
-static CFunctionHook* g_pX11ConfigureRequestHook   = nullptr;
-static CFunctionHook* g_pX11ClientMessageHook      = nullptr;
+static COverviewFunctionHook* g_pScrollRenderWorkspaceHook = nullptr;
+static COverviewFunctionHook* g_pScrollAddDamageHookA      = nullptr;
+static COverviewFunctionHook* g_pScrollAddDamageHookB      = nullptr;
+static COverviewFunctionHook* g_pScrollDamageSurfaceHook   = nullptr;
+static COverviewFunctionHook* g_pScrollScheduleFrameHook   = nullptr;
+static COverviewFunctionHook* g_pScrollSendFrameEventsHook = nullptr;
+static COverviewFunctionHook* g_pScrollSurfaceFrameHook    = nullptr;
+static COverviewFunctionHook* g_pScrollDrawTexHook         = nullptr;
+static COverviewFunctionHook* g_pScrollElementDrawTexHook  = nullptr;
+static COverviewFunctionHook* g_pPopupRepositionHook       = nullptr;
+static COverviewFunctionHook* g_pBeginDragTargetHook       = nullptr;
+static COverviewFunctionHook* g_pX11ConfigureHook          = nullptr;
+static COverviewFunctionHook* g_pX11ConfigureRequestHook   = nullptr;
+static COverviewFunctionHook* g_pX11ClientMessageHook      = nullptr;
 
 namespace Desktop::View {
     class CPopup;
@@ -825,67 +826,67 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         throw std::runtime_error("[he] Version mismatch");
     }
 
-    g_pScrollRenderWorkspaceHook = HyprlandAPI::createFunctionHook(
+    g_pScrollRenderWorkspaceHook = createOverviewFunctionHook(
         SCROLLOVERVIEW_HANDLE,
         findFnOrThrow("renderWorkspace", {"CHyprRenderer::renderWorkspace(", "IHyprRenderer::renderWorkspace("}),
         rc<void*>(hkRenderWorkspace));
 
-    g_pScrollScheduleFrameHook = HyprlandAPI::createFunctionHook(
+    g_pScrollScheduleFrameHook = createOverviewFunctionHook(
         SCROLLOVERVIEW_HANDLE, 
         findFnOrThrow("_ZN7Monitor8CMonitor13scheduleFrameEN10Aquamarine7IOutput19scheduleFrameReasonE", {""}),
         rc<void*>(hkScheduleFrame));
 
-    g_pScrollDamageSurfaceHook = HyprlandAPI::createFunctionHook(
+    g_pScrollDamageSurfaceHook = createOverviewFunctionHook(
         SCROLLOVERVIEW_HANDLE,
         findFnOrThrow("damageSurface", {"CHyprRenderer::damageSurface(", "IHyprRenderer::damageSurface("}),
         rc<void*>(hkDamageSurface));
 
-    g_pScrollSendFrameEventsHook = HyprlandAPI::createFunctionHook(
+    g_pScrollSendFrameEventsHook = createOverviewFunctionHook(
         SCROLLOVERVIEW_HANDLE,
         findFnOrThrow("sendFrameEventsToWorkspace", {"CHyprRenderer::sendFrameEventsToWorkspace(", "IHyprRenderer::sendFrameEventsToWorkspace("}),
         rc<void*>(hkSendFrameEventsToWorkspace));
 
-    g_pScrollSurfaceFrameHook = HyprlandAPI::createFunctionHook(
+    g_pScrollSurfaceFrameHook = createOverviewFunctionHook(
         SCROLLOVERVIEW_HANDLE,
         findFnOrThrow("_ZN18CWLSurfaceResource5frameERKNSt6chrono10time_pointINS0_3_V212steady_clockENS0_8durationIlSt5ratioILl1ELl1000000000EEEEEE", {""}),
         rc<void*>(hkSurfaceFrame));
 
-    g_pScrollAddDamageHookB = HyprlandAPI::createFunctionHook(
+    g_pScrollAddDamageHookB = createOverviewFunctionHook(
         SCROLLOVERVIEW_HANDLE,
         findFnOrThrow("addDamageEPK15pixman_region32", {"CMonitor::addDamage"}),
         rc<void*>(hkAddDamageB));
 
-    g_pScrollAddDamageHookA = HyprlandAPI::createFunctionHook(
+    g_pScrollAddDamageHookA = createOverviewFunctionHook(
         SCROLLOVERVIEW_HANDLE,
         findFnOrThrow("_ZN7Monitor8CMonitor9addDamageERKN9Hyprutils4Math4CBoxE", {""}),
         rc<void*>(hkAddDamageA));
 
-    g_pScrollDrawTexHook = HyprlandAPI::createFunctionHook(
+    g_pScrollDrawTexHook = createOverviewFunctionHook(
         SCROLLOVERVIEW_HANDLE,
         findFnOrThrow("draw", {"CGLElementRenderer::draw(Hyprutils::Memory::CWeakPointer<CTexPassElement>"}),
         rc<void*>(hkDrawTex));
 
-    g_pScrollElementDrawTexHook = HyprlandAPI::createFunctionHook(
+    g_pScrollElementDrawTexHook = createOverviewFunctionHook(
         SCROLLOVERVIEW_HANDLE,
         findFnOrThrow("drawTex", {"IElementRenderer::drawTex(Hyprutils::Memory::CWeakPointer<CTexPassElement>"}),
         rc<void*>(hkElementDrawTex));
 
-    g_pBeginDragTargetHook = HyprlandAPI::createFunctionHook(SCROLLOVERVIEW_HANDLE,
+    g_pBeginDragTargetHook = createOverviewFunctionHook(SCROLLOVERVIEW_HANDLE,
                                                              findFnOrThrow("beginDragTarget", {"CLayoutManager::beginDragTarget("}),
                                                              rc<void*>(hkBeginDragTarget));
 
-    g_pX11ConfigureHook = HyprlandAPI::createFunctionHook(SCROLLOVERVIEW_HANDLE, findFnOrThrow("configure", {"CXWaylandSurface::configure("}),
+    g_pX11ConfigureHook = createOverviewFunctionHook(SCROLLOVERVIEW_HANDLE, findFnOrThrow("configure", {"CXWaylandSurface::configure("}),
                                                           rc<void*>(hkX11Configure));
-    g_pX11ConfigureRequestHook = HyprlandAPI::createFunctionHook(SCROLLOVERVIEW_HANDLE, findFnOrThrow("onX11ConfigureRequest", {"CWindow::onX11ConfigureRequest("}),
+    g_pX11ConfigureRequestHook = createOverviewFunctionHook(SCROLLOVERVIEW_HANDLE, findFnOrThrow("onX11ConfigureRequest", {"CWindow::onX11ConfigureRequest("}),
                                                                  rc<void*>(hkX11ConfigureRequest));
 
-    g_pX11ClientMessageHook = HyprlandAPI::createFunctionHook(SCROLLOVERVIEW_HANDLE, findFnOrThrow("handleClientMessage", {"CXWM::handleClientMessage("}),
+    g_pX11ClientMessageHook = createOverviewFunctionHook(SCROLLOVERVIEW_HANDLE, findFnOrThrow("handleClientMessage", {"CXWM::handleClientMessage("}),
                                                               rc<void*>(hkX11ClientMessage));
     if (!g_pX11ClientMessageHook || !g_pX11ClientMessageHook->hook())
         Log::logger->log(Log::WARN, "[spatialoverview] could not hook X11 client messages; X11 apps flashing for attention may leave fullscreen");
 
     // Popups of canvas windows are kept on screen as the canvas shows them.
-    g_pPopupRepositionHook = HyprlandAPI::createFunctionHook(SCROLLOVERVIEW_HANDLE, findFnOrThrow("reposition", {"Desktop::View::CPopup::reposition()"}),
+    g_pPopupRepositionHook = createOverviewFunctionHook(SCROLLOVERVIEW_HANDLE, findFnOrThrow("reposition", {"Desktop::View::CPopup::reposition()"}),
                                                              rc<void*>(hkPopupReposition));
 
     static auto P = Event::bus()->m_events.render.pre.listen([](PHLMONITOR monitor) {
@@ -973,6 +974,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
     clearScrollOverviews();
     disableScrollOverviewHooks();
     canvasReleaseX11Windows();
+    releaseOverviewFunctionHooks();
 
     disarmCanvasTimers();
     SpatialOverview::Navigator::shutdown();

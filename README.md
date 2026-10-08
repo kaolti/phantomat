@@ -66,6 +66,12 @@ settings file, the `hl.plugin.spatialoverview` actions and the
 `hyprctl spatialoverview` command keep that name, so configs from before the
 rename keep working.
 
+### ARM64 / Apple Silicon
+
+A plugin-local Dobby backend supports for ARM64, where Hyprland 0.56's
+native function hooks are disabled. Build instructions and the tested M1
+configuration are in [docs/arm64.md](docs/arm64.md).
+
 **After a Hyprland update**, the plugin has to be rebuilt for the new version.
 Hyprland shows a notification when that is the case; run the installer again:
 
