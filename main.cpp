@@ -28,6 +28,7 @@ using namespace Hyprutils::String;
 #include "Config.hpp"
 #include "PluginVersion.hpp"
 #include "scrollOverview.hpp"
+#include "CanvasDnd.hpp"
 #include "BarrelShader.hpp"
 #include "Experiments.hpp"
 #include "Hud.hpp"
@@ -970,6 +971,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
         HyprlandAPI::unregisterHyprCtlCommand(SCROLLOVERVIEW_HANDLE, g_stateCommand);
     g_stateCommand.reset();
     canvasFullscreenReset();
+    SpatialOverview::CanvasDnd::shutdown();
     clearScrollOverviews();
     disableScrollOverviewHooks();
     canvasReleaseX11Windows();
