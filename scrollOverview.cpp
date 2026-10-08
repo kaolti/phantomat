@@ -1,4 +1,5 @@
 #include "scrollOverview.hpp"
+#include "CanvasDnd.hpp"
 #include <algorithm>
 #include <any>
 #include <array>
@@ -29,7 +30,6 @@
 #include <hyprland/src/config/shared/animation/AnimationTree.hpp>
 #include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
 #include <hyprland/src/protocols/PointerConstraints.hpp>
-#include <hyprland/src/protocols/core/DataDevice.hpp>
 #include <hyprland/src/pointer/PointerController.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/animation/AnimationManager.hpp>
@@ -119,11 +119,9 @@ static const CScrollOverview* g_linkedLeader = nullptr; // linked screens: whose
 static Time::steady_tp        g_linkedLeaderMovedAt;    // when the leader last moved its own camera
 static int g_userFollowMouse = 1; // input:follow_mouse as set before the canvas turned it off
 
-// Yield compositor DnD (Files→Files, Nautilus→apps) to Hyprland. Persistent
-// canvas mode cancels mouse moves and pins seat focus to the press window while
-// the button is held, so dndPointerFocus never tracks the drop target.
+// wl_data_device drags (file drag, browser tab drag): see CanvasDnd.hpp.
 static bool canvasCompositorDndActive() {
-    return PROTO::data && PROTO::data->dndActive();
+    return SpatialOverview::CanvasDnd::active();
 }
 
 // Going to a place at 100% shows the minimap for a moment (see canvasPlaceAction).
@@ -1429,6 +1427,8 @@ static void moveOverviewTargetNextToWindow(const SP<Layout::ITarget>& target, co
 CScrollOverview::~CScrollOverview() {
     if (g_pointerGrabOverview == this)
         g_pointerGrabOverview = nullptr;
+    // A drag target this canvas picked is no longer drawn by it.
+    SpatialOverview::CanvasDnd::canvasGone();
     transferSharedStateOwnership();
     restoreSubmapIfActive();
     if (const auto OPENGL = g_pHyprRenderer ? g_pHyprRenderer->glBackend() : WP<Render::GL::CHyprOpenGLImpl>{})
@@ -1581,6 +1581,10 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
             return;
         const auto INPUTOVERVIEW = scrollOverviewAt(g_pInputManager->getMouseCoordsInternal());
 
+        // A drag the canvas does not own is Hyprland's, motion and all.
+        if (canvasCompositorDndActive() && routeCanvasDndMotion(INPUTOVERVIEW, info))
+            return;
+
         if (closing || (g_pointerGrabOverview && g_pointerGrabOverview != this) || (!g_pointerGrabOverview && INPUTOVERVIEW.get() != this))
             return;
 
@@ -1634,24 +1638,6 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
         if (canvasArrangeButtonPressed) {
             info.cancelled = true;
             requestInputFrame();
-            return;
-        }
-
-        // App file / tab DnD (wl_data_device). On the canvas windows are drawn
-        // away from their real (world) positions, so Hyprland's own hit test
-        // and DnD motion are wrong here: the canvas drives the DnD target and
-        // surface-local motion itself, and Hyprland's pointer path is skipped.
-        if (canvasCompositorDndActive()) {
-            if (!canvasForwardedPointerButtons.empty()) {
-                canvasForwardedPointerButtons.clear();
-                canvasForwardedPointerWindow.reset();
-                canvasForwardedPointerSurface.reset();
-            }
-            if (isCanvasDesktop()) {
-                info.cancelled = true;
-                canvasDndPointerMotion();
-                requestInputFrame();
-            }
             return;
         }
 
@@ -1740,6 +1726,19 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
         if (info.cancelled || sessionLocked())
             return;
 
+        // During a drag the release is the drop: Hyprland's drag listener and
+        // input path must get it, whichever screen or surface it lands on.
+        if (canvasCompositorDndActive()) {
+            if (!canvasForwardedPointerButtons.empty()) {
+                canvasForwardedPointerButtons.clear();
+                canvasForwardedPointerWindow.reset();
+                canvasForwardedPointerSurface.reset();
+            }
+            if (event.state == WL_POINTER_BUTTON_STATE_RELEASED)
+                g_topLayerPointerButtons.erase(event.button); // a drag that began on a panel
+            return;
+        }
+
         const bool FORWARDEDTOPLAYERRELEASE =
             event.state == WL_POINTER_BUTTON_STATE_RELEASED && g_topLayerPointerButtons.contains(event.button);
         const auto INPUTOVERVIEW = scrollOverviewAt(g_pInputManager->getMouseCoordsInternal());
@@ -1781,15 +1780,6 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
         }
 
         if (isCanvasDesktop()) {
-            // Release seat during compositor DnD so drop/leave reach the target.
-            if (canvasCompositorDndActive()) {
-                if (!canvasForwardedPointerButtons.empty()) {
-                    canvasForwardedPointerButtons.clear();
-                    canvasForwardedPointerWindow.reset();
-                    canvasForwardedPointerSurface.reset();
-                }
-                return;
-            }
             lastMousePosLocal         = getOverviewMousePosLocal(pMonitor.lock());
             const bool LEFT_HANDED    = ScrollOverview::Config::getLeftHanded();
             const uint32_t MAIN       = LEFT_HANDED ? BTN_RIGHT : BTN_LEFT;
@@ -2329,6 +2319,10 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
             }
         } else if (event.state == WL_KEYBOARD_KEY_STATE_PRESSED)
             SpatialOverview::Navigator::takeConsumed(event.keycode); // a fresh press means its old release was lost
+
+        // Escape cancels a drag; Hyprland does that once the key reaches it.
+        if (KEYSYM == XKB_KEY_Escape && canvasCompositorDndActive())
+            return;
 
         if (closing || activeScrollOverview().get() != this)
             return;
@@ -4980,49 +4974,72 @@ void CScrollOverview::seedCanvasWindows() {
         manageCanvasWindow(window, true);
 }
 
-void CScrollOverview::canvasDndPointerMotion() {
-    if (!PROTO::data || !PROTO::data->dndActive() || !isCanvasDesktop())
-        return;
+SP<CWLSurfaceResource> CScrollOverview::canvasDndTargetAt(const Vector2D& point, Vector2D& surfaceLocal) const {
+    CBox       BOX;
+    Vector2D   WINDOWLOCAL;
+    const auto WINDOW = canvasDesktopWindowAtPoint(point, &BOX, &WINDOWLOCAL);
+    if (!WINDOW || !WINDOW->wlSurface() || !WINDOW->wlSurface()->resource())
+        return {};
 
-    // Hyprland's DnD motion listener measures from the real window position,
-    // which on the canvas is not where the window is drawn. Motion is sent below.
-    PROTO::data->m_dnd.mouseMove.reset();
+    SP<CWLSurfaceResource> surface;
+    const auto             WORLDPOINT = WINDOW->geometricBox(Desktop::View::IGeometric::GEOMETRIC_CURRENT).pos() + WINDOWLOCAL;
+    if (WINDOW->m_isX11) {
+        surface      = WINDOW->wlSurface()->resource();
+        surfaceLocal = WINDOWLOCAL * WINDOW->m_X11SurfaceScaledBy;
+    } else
+        surface = Desktop::viewState()->hitTest().windowSurfaceAt(WORLDPOINT, WINDOW, surfaceLocal);
+    if (!surface) {
+        surface      = WINDOW->wlSurface()->resource();
+        surfaceLocal = Desktop::viewState()->hitTest().surfaceLocalAt(WORLDPOINT, WINDOW, surface);
+    }
+    return surface;
+}
 
-    CBox                   BOX;
-    Vector2D               WINDOWLOCAL;
-    Vector2D               SURFACELOCAL;
-    SP<CWLSurfaceResource> SURFACE;
-    const auto             WINDOW = canvasDesktopWindowAtPoint(lastMousePosLocal, &BOX, &WINDOWLOCAL);
-    if (WINDOW && WINDOW->wlSurface() && WINDOW->wlSurface()->resource()) {
-        const auto WORLDPOINT = WINDOW->geometricBox(Desktop::View::IGeometric::GEOMETRIC_CURRENT).pos() + WINDOWLOCAL;
-        if (WINDOW->m_isX11) {
-            SURFACE      = WINDOW->wlSurface()->resource();
-            SURFACELOCAL = WINDOWLOCAL * WINDOW->m_X11SurfaceScaledBy;
-        } else
-            SURFACE = Desktop::viewState()->hitTest().windowSurfaceAt(WORLDPOINT, WINDOW, SURFACELOCAL);
-        if (!SURFACE) {
-            SURFACE      = WINDOW->wlSurface()->resource();
-            SURFACELOCAL = Desktop::viewState()->hitTest().surfaceLocalAt(WORLDPOINT, WINDOW, SURFACE);
-        }
+bool CScrollOverview::routeCanvasDndMotion(const SP<IOverview>& inputOverview, Event::SCallbackInfo& info) {
+    namespace Dnd = SpatialOverview::CanvasDnd;
+    Dnd::sync();
+
+    // Another screen: its own canvas routes it, or, with no canvas there (none,
+    // or it stepped aside for a fullscreen window), Hyprland targets and moves
+    // the drag itself.
+    if (inputOverview.get() != this)
+        return true;
+
+    // The drag owns the pointer: a button forwarded before it began is gone.
+    if (!canvasForwardedPointerButtons.empty()) {
+        canvasForwardedPointerButtons.clear();
+        canvasForwardedPointerWindow.reset();
+        canvasForwardedPointerSurface.reset();
     }
 
-    if (!SURFACE) {
-        // Over empty canvas: leave the last target so a drop here is cancelled.
-        if (g_pSeatManager->m_state.dndPointerFocus) {
-            g_pSeatManager->m_state.dndPointerFocus.reset();
-            g_pSeatManager->m_events.dndPointerFocusChange.emit();
-            PROTO::data->m_dnd.focusedDevice.reset();
-        }
-        return;
+    lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
+
+    Vector2D               surfaceLocal;
+    SP<CWLSurfaceResource> target;
+    Dnd::SPointerProbe     probe{
+                 .dragActive          = true,
+                 .buttonHeld          = Dnd::buttonHeld(),
+                 .pointerOnThisCanvas = isCanvasDesktop(),
+                 .closing             = closing,
+                 .layerAbove          = isPointerOnTopLayer(pMonitor.lock()),
+    };
+    if (probe.pointerOnThisCanvas && !probe.closing && probe.buttonHeld && !probe.layerAbove) {
+        target                  = canvasDndTargetAt(lastMousePosLocal, surfaceLocal);
+        probe.canvasWindowBelow = !!target;
     }
 
-    if (g_pSeatManager->m_state.dndPointerFocus.lock() != SURFACE) {
-        g_pSeatManager->m_state.dndPointerFocus = SURFACE;
-        g_pSeatManager->m_events.dndPointerFocusChange.emit(); // -> updateDrag: leave old, enter new
+    switch (Dnd::route(probe)) {
+        case Dnd::ERoute::NOT_DRAGGING: return false;
+        case Dnd::ERoute::HYPRLAND: return true; // not cancelled: Hyprland's hit test and motion
+        case Dnd::ERoute::DROPPED: info.cancelled = true; return true;
+        case Dnd::ERoute::CANVAS_TARGET: Dnd::focusCanvasTarget(target, surfaceLocal); break;
+        case Dnd::ERoute::CANVAS_EMPTY: Dnd::clearTarget(); break;
     }
 
-    if (const auto DEVICE = PROTO::data->m_dnd.focusedDevice.lock())
-        DEVICE->sendMotion(Time::millis(Time::steadyNow()), SURFACELOCAL);
+    // Hyprland would hit-test canvas windows at their real position here.
+    info.cancelled = true;
+    requestInputFrame();
+    return true;
 }
 
 void CScrollOverview::forwardCanvasPointerMotion(uint32_t timeMs) {

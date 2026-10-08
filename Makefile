@@ -10,7 +10,7 @@ VERSION_SCRIPT = scripts/generate-plugin-version.sh
 OUT ?= spatialoverview.so
 OBJDIR = .build/obj
 
-SOURCES = main.cpp BarrelShader.cpp Config.cpp DropIndicator.cpp Experiments.cpp Hud.cpp Icons.cpp Memory.cpp Navigator.cpp OverviewGesture.cpp OverviewManager.cpp \
+SOURCES = main.cpp BarrelShader.cpp CanvasDnd.cpp Config.cpp DropIndicator.cpp Experiments.cpp Hud.cpp Icons.cpp Memory.cpp Navigator.cpp OverviewGesture.cpp OverviewManager.cpp \
           OverviewPassElement.cpp OverviewRender.cpp Popups.cpp Cursor.cpp Tuning.cpp Window.cpp scrollOverview.cpp
 OBJECTS = $(SOURCES:%.cpp=$(OBJDIR)/%.o)
 PKGS    = pixman-1 libdrm hyprland pangocairo libinput libudev wayland-server xkbcommon '$(LUA_PKG) >= 5.4'
@@ -20,7 +20,7 @@ ifeq ($(CXX),g++)
     EXTRA_FLAGS += -fno-gnu-unique
 endif
 
-.PHONY: all clean safe-unload test-tools FORCE
+.PHONY: all clean safe-unload test-tools test-dnd-route FORCE
 
 all: $(OBJECTS)
 	@mkdir -p $(dir $(OUT))
@@ -61,6 +61,12 @@ $(VPOINTER): tests/tools/vpointer.c $(VPOINTER_PROTOCOL)
 	wayland-scanner client-header $(VPOINTER_PROTOCOL) .build/vpointer-gen/wlr-virtual-pointer-unstable-v1-client-protocol.h
 	wayland-scanner private-code $(VPOINTER_PROTOCOL) .build/vpointer-gen/wlr-virtual-pointer-unstable-v1-protocol.c
 	$(CC) -O2 -I.build/vpointer-gen $< .build/vpointer-gen/wlr-virtual-pointer-unstable-v1-protocol.c -lwayland-client -lm -o $@
+
+# Who drives a drag on the canvas, without a compositor (CanvasDndRoute.hpp).
+test-dnd-route:
+	@mkdir -p .build
+	$(CXX) -std=c++2b -Wall -Wextra -I. tests/canvas-dnd-route-test.cpp -o .build/canvas-dnd-route-test
+	.build/canvas-dnd-route-test
 
 # Helper that install-live.sh loads to unload the running build safely.
 SAFE_UNLOAD = .build/safe-unload.so

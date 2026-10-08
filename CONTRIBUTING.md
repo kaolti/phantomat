@@ -14,6 +14,8 @@ make                                   # builds spatialoverview.so
 make test-tools                        # the virtual mouse some tests use
 python3 tests/navigator-nested.py --plugin spatialoverview.so
 python3 tests/popup-nested.py spatialoverview.so
+make test-dnd-route                    # drag-and-drop routing, no compositor needed
+python3 tests/dnd-nested.py spatialoverview.so
 ```
 
 Each test opens Hyprland in a window of its own and closes it again; nothing
