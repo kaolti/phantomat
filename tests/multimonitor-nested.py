@@ -74,7 +74,8 @@ try:
             n.dispatch(f"hl.dsp.cursor.move({{x={cx + 3:.0f}, y={cy + 2:.0f}}})"); time.sleep(0.3)
             mouse("down", "sleep", 60, "up", "sleep", 400)
             check(count(name, "press 1" if name == "x11" else "click") > before, f"[{name}] a click on its copy on {monitor} reaches the window")
-    subprocess.run(["grim", "-o", "WAYLAND-1", os.path.join(ROOT, ".build/shots-mm2", "WAYLAND-1.png")], env=n.env())
+    os.makedirs(os.path.join(ROOT, ".build/shots-mm2"), exist_ok=True)
+    subprocess.run(["grim", "-o", "WAYLAND-1", os.path.join(ROOT, ".build/shots-mm2", "WAYLAND-1.png")], env=n.env(), check=True)
     check(n.proc.poll() is None, "compositor alive")
 finally:
     n.stop()

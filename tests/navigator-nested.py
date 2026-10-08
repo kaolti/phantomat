@@ -103,6 +103,27 @@ class Nested:
             time.sleep(0.1)
         if not self.sig:
             raise RuntimeError("nested compositor did not register")
+        # A nested compositor is itself a window in the host. A tiled host can
+        # resize it below the requested mode, invalidating the popup/pixel tests.
+        # Only float/resize this test process's host window, never user windows.
+        host_sig = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")
+        if host_sig and host_sig != self.sig:
+            for _ in range(50):
+                result = subprocess.run(["hyprctl", "-i", host_sig, "clients", "-j"], capture_output=True, text=True, timeout=3)
+                hosts = json.loads(result.stdout) if result.returncode == 0 else []
+                host = next((c for c in hosts if c.get("pid") == self.proc.pid), None)
+                if host:
+                    selector = json.dumps("address:" + host["address"])
+                    mode = os.environ.get("NESTED_MODE", "1280x720@60").split("@")[0]
+                    width, height = map(int, mode.split("x"))
+                    for expr in (
+                        f'hl.dsp.window.float({{action="set", window={selector}}})',
+                        f'hl.dsp.window.resize({{x={width}, y={height}, window={selector}}})',
+                    ):
+                        subprocess.run(["hyprctl", "-i", host_sig, "dispatch", expr], check=True, capture_output=True, text=True, timeout=3)
+                    time.sleep(0.3)
+                    break
+                time.sleep(0.1)
         errors = self.ctl("configerrors", check=False)
         if errors:
             raise RuntimeError("config errors: " + errors)
