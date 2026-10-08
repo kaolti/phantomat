@@ -4334,7 +4334,7 @@ bool canvasToggleFill(PHLWINDOW window) {
     // zoomed-out view it lands on the window first.
     if (canvas->isCanvasNavigationActive()) {
         canvas->canvasAdoptFocus(window);
-        canvas->flightDeckAction("land");
+        canvas->landOnWindow(window);
         leaveNavigationEverywhere(canvas);
     }
     // A filled window is the one you are looking at: on top of the others.
@@ -4354,11 +4354,13 @@ bool canvasToggleFill(PHLWINDOW window) {
             // Untouched since: back exactly where and how big it was.
             if (NOW.pos().distanceSq(ENTRY.filled.pos()) < 1.0 && NOW.size().distanceSq(ENTRY.filled.size()) < 1.0) {
                 apply(ENTRY.before);
+                canvas->followCanvasWindow(window, true, true);
                 return true;
             }
             // Moved since: its old size, around where it is now.
             if (NOW.size().distanceSq(ENTRY.filled.size()) < 1.0) {
                 apply(CBox{NOW.middle() - ENTRY.before.size() / 2.0, ENTRY.before.size()});
+                canvas->followCanvasWindow(window, true, true);
                 return true;
             }
             // Resized since: it is not filling anything any more; fill again.
@@ -4372,6 +4374,7 @@ bool canvasToggleFill(PHLWINDOW window) {
     const CBox FILLED{WORLD->pos(), AREA.size()};
     g_canvasFill[window.get()] = {.window = window, .before = NOW, .filled = FILLED};
     apply(FILLED);
+    canvas->followCanvasWindow(window, true, true);
     return true;
 }
 
@@ -9614,15 +9617,17 @@ Vector2D CScrollOverview::canvasCameraOffsetFor(const PHLWINDOW& window, float z
         // Keep the selection clear of the search palette above it.
         if (showsNavigatorHud())
             target.y -= (SpatialOverview::Hud::selectionFocusY(MONITOR->m_size) - MONITOR->m_size.y * 0.5) / std::max(zoom, 0.01F);
-    } else {
-        // At 100% an oversized window keeps its top-left corner on screen,
-        // where title bars, tabs and menus live.
-        if (BOX.width > MONITOR->m_size.x)
-            target.x = BOX.x + MONITOR->m_size.x * 0.5;
-        if (BOX.height > MONITOR->m_size.y)
-            target.y = BOX.y + MONITOR->m_size.y * 0.5;
+        return target - MONITOR->m_position - MONITOR->m_size * 0.5F;
     }
-    return target - MONITOR->m_position - MONITOR->m_size * 0.5F;
+
+    // At 100% (desktop), center within the usable workspace (excluding top bar / docks).
+    const auto USABLE = MONITOR->logicalBoxMinusReserved();
+    if (BOX.width > USABLE.width)
+        target.x = BOX.x + USABLE.width * 0.5;
+    if (BOX.height > USABLE.height)
+        target.y = BOX.y + USABLE.height * 0.5;
+
+    return target - USABLE.middle();
 }
 
 void CScrollOverview::followNavigatorSelection() {

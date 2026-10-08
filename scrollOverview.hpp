@@ -71,6 +71,7 @@ class CScrollOverview : public IOverview {
     bool         navigatorKeyAction(uint32_t keysym, uint32_t mods, const std::string& text, bool repeat);
     bool         openNavigator(const std::string& query = {});
     void         landOnWindow(PHLWINDOW window);
+    bool         followCanvasWindow(PHLWINDOW window, bool syncFocus, bool animate = true);
     void         summonWindow(PHLWINDOW window);
     void         revertAllNavigation();
     void         fitAllWindows();
